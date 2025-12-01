@@ -11,12 +11,12 @@ use nix::{
         stat::Mode,
         wait::{waitpid, WaitPidFlag, WaitStatus},
     },
-    unistd::{close, pipe, Pid},
+    unistd::{pipe, Pid},
 };
 use std::{
     fs::File,
     mem,
-    os::unix::prelude::FromRawFd,
+    os::unix::io::{AsRawFd, FromRawFd, IntoRawFd},
     ptr::{null, null_mut as NULL},
     result::Result,
 };
@@ -61,12 +61,12 @@ pub fn new_process(
         ))?;
         Errno::result(posix_spawn_file_actions_adddup2(
             &mut file_actions,
-            pipe3_read,
+            pipe3_read.as_raw_fd(),
             3,
         ))?;
         Errno::result(posix_spawn_file_actions_adddup2(
             &mut file_actions,
-            pipe4_write,
+            pipe4_write.as_raw_fd(),
             4,
         ))?;
 
@@ -89,11 +89,13 @@ pub fn new_process(
             environ,
         ))?;
 
-        writep = PipeWriter::new(File::from_raw_fd(pipe3_write));
-        readp = PipeReader::new(File::from_raw_fd(pipe4_read));
+        writep = PipeWriter::new(File::from_raw_fd(pipe3_write.into_raw_fd()));
+        readp = PipeReader::new(File::from_raw_fd(pipe4_read.into_raw_fd()));
     }
-    close(pipe3_read)?;
-    close(pipe4_write)?;
+    // Close the pipe ends we passed to the child process
+    // OwnedFd will close automatically when dropped
+    drop(pipe3_read);
+    drop(pipe4_write);
 
     Ok((Pid::from_raw(pid), readp, writep))
 }

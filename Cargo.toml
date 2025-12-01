@@ -2,7 +2,7 @@
 name = "alcro"
 version = "0.5.4"
 authors = ["Srinivasa <m.srinivasa1234@gmail.com>"]
-edition = "2018"
+edition = "2024"
 description = "A library to create desktop apps using rust and modern web technologies"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
@@ -16,29 +16,27 @@ name = "tokio_test"
 required-features = ["tokio"]
 
 [dependencies]
-serde = { version = "1.0.136", features = ["derive"] }
-serde_json = "1.0.79"
-crossbeam-channel = "0.5.2"
-tinyfiledialogs = "3.9.0"
-libc = "0.2.119"
-serde_derive = "1.0.136"
-dashmap = "5.1.0"
-thiserror = "1.0.30"
-tempfile = "3.3.0"
-nix = "0.23.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+crossbeam-channel = "0.5"
+tinyfiledialogs = "3"
+libc = "0.2"
+dashmap = "6"
+thiserror = "2"
+tempfile = "3"
+nix = { version = "0.30", features = ["signal", "process", "fs"] }
 
-tokio = { version = "1.17.0", features = ["rt"], optional = true }
+tokio = { version = "1", features = ["rt"], optional = true }
 
 [target.'cfg(windows)'.dependencies]
-winapi = { version = "0.3.9", features = ["namedpipeapi" , "synchapi" , "handleapi" ] }
-os_str_bytes = "6.0.0"
+winapi = { version = "0.3", features = ["namedpipeapi", "synchapi", "handleapi", "errhandlingapi", "fileapi", "processthreadsapi", "winbase"] }
 
 [dev-dependencies]
-actix-web = "3.3.3"
-actix-rt = "2.6.0"
-rust-embed = "6.3.0"
-mime_guess = "2.0.4"
-futures = "0.3.21"
-anyhow = "1.0.55"
+actix-web = "4"
+actix-rt = "2"
+rust-embed = "8"
+mime_guess = "2"
+futures = "0.3"
+anyhow = "1"
 
-tokio = { version = "1.17.0", features = ["rt", "rt-multi-thread", "macros"] }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros"] }

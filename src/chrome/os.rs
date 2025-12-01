@@ -47,7 +47,7 @@ impl PipeWriter {
         use std::io::Write;
         match std::ffi::CString::new(message) {
             Ok(cstr) => Ok(self.pipe.write(cstr.as_bytes_with_nul())?),
-            Err(_) => return Err(PipeWriteError::NullCharacterPresent),
+            Err(_) => Err(PipeWriteError::NullCharacterPresent),
         }
     }
 }

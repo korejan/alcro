@@ -123,6 +123,7 @@ pub struct Chrome {
     precv: Mutex<PipeReader>,
     target: String,
     session: String,
+    #[allow(dead_code)]
     kill_send: Sender<()>,
     pending: dashmap::DashMap<i32, Sender<JSResult>>,
     window: AtomicI32,
@@ -173,8 +174,8 @@ impl WindowState {
 impl Chrome {
     pub fn new_with_args(chrome_binary: &str, args: &[&str]) -> Result<Arc<Chrome>, JSError> {
         let (pid, precv, psend) =
-            new_process(chrome_binary, &args).expect("Unable to launch chrome");
-        let (kill_send, kill_recv) = bounded(1);
+            new_process(chrome_binary, args).expect("Unable to launch chrome");
+        let (kill_send, _kill_recv) = bounded(1);
 
         let mut c = Chrome {
             id: AtomicI32::new(2),
@@ -364,7 +365,7 @@ pub fn load_js(c: Arc<Chrome>, script: &str) -> Result<(), JSError> {
     ) {
         return Err(e.into());
     }
-    eval(Arc::clone(&c), &script).to_result_of_jserror()
+    eval(Arc::clone(&c), script).to_result_of_jserror()
 }
 
 pub fn load_css(c: Arc<Chrome>, css: &str) -> Result<(), JSError> {

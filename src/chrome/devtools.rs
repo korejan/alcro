@@ -69,7 +69,7 @@ pub fn readloop(c: Arc<Chrome>) {
                 match c.pending.get(&res_id) {
                     None => continue,
                     Some(reschan) => {
-                        send_result(&*reschan, &res);
+                        send_result(&reschan, &res);
                     }
                 }
                 c.pending.remove(&res_id);

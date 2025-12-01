@@ -13,10 +13,10 @@ fn main() -> anyhow::Result<()> {
             .unwrap(),
         "JS Rust Communication"
     );
-    ui.eval("document.getElementById('result').innerText='Type the file name in the input box and click the button the result will be displayed'").map_err(|e|JSError::from(e))?;
+    ui.eval("document.getElementById('result').innerText='Type the file name in the input box and click the button the result will be displayed'").map_err(JSError::from)?;
 
     ui.bind("readFile", |args| {
-        if args.len() == 0 {
+        if args.is_empty() {
             Err(to_value("File name required").unwrap())
         } else {
             match args[0].as_str() {

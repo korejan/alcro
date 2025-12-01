@@ -1,5 +1,5 @@
 #![windows_subsystem = "windows"]
-use actix_web::{body::Body, web, App, HttpRequest, HttpResponse, HttpServer};
+use actix_web::{web, App, HttpRequest, HttpResponse, HttpServer};
 use alcro::{Content, UIBuilder};
 use mime_guess::from_path;
 use rust_embed::RustEmbed;
@@ -9,7 +9,7 @@ use std::{borrow::Cow, sync::mpsc, thread};
 #[folder = "examples/actix-embed"]
 struct Asset;
 
-fn assets(req: HttpRequest) -> HttpResponse {
+async fn assets(req: HttpRequest) -> HttpResponse {
     let path = if req.path() == "/" {
         // if there is no path, return default file
         "index.html"
@@ -21,9 +21,9 @@ fn assets(req: HttpRequest) -> HttpResponse {
     // query the file from embedded asset with specified path
     match Asset::get(path) {
         Some(content) => {
-            let body: Body = match content.data {
-                Cow::Borrowed(bytes) => bytes.into(),
-                Cow::Owned(bytes) => bytes.into(),
+            let body = match content.data {
+                Cow::Borrowed(bytes) => bytes.to_vec(),
+                Cow::Owned(bytes) => bytes,
             };
             HttpResponse::Ok()
                 .content_type(from_path(path).first_or_octet_stream().as_ref())
@@ -41,22 +41,26 @@ fn main() -> anyhow::Result<()> {
     thread::spawn(move || {
         let sys = actix_rt::System::new();
 
-        let server = HttpServer::new(|| App::new().route("*", web::get().to(assets)))
-            .bind("127.0.0.1:0")
-            .unwrap();
+        sys.block_on(async {
+            let server = HttpServer::new(|| App::new().route("*", web::get().to(assets)))
+                .bind("127.0.0.1:0")
+                .unwrap();
 
-        // we specified the port to be 0,
-        // meaning the operating system
-        // will choose some available port
-        // for us
-        // get the first bound address' port,
-        // so we know where to point at
-        let port = server.addrs().first().unwrap().port();
-        let server = server.run();
+            // we specified the port to be 0,
+            // meaning the operating system
+            // will choose some available port
+            // for us
+            // get the first bound address' port,
+            // so we know where to point at
+            let port = server.addrs().first().unwrap().port();
+            let server = server.run();
 
-        let _ = port_tx.send(port);
-        let _ = server_tx.send(server);
-        let _ = sys.run();
+            let _ = port_tx.send(port);
+            let _ = server_tx.send(server);
+
+            // Keep the server running
+            futures::future::pending::<()>().await;
+        });
     });
 
     let port = port_rx.recv().unwrap();
@@ -72,6 +76,6 @@ fn main() -> anyhow::Result<()> {
 
     ui.wait_finish();
     // gracefully shutdown actix web server
-    futures::executor::block_on(server.stop(true));
+    drop(server);
     Ok(())
 }

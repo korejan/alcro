@@ -243,7 +243,7 @@ impl UI {
     ///
     /// * `name` - Name of the function
     /// * `f` - The function. It should take a [`BindingContext`] that gives access to the
-    ///         arguments and allows returning results.
+    ///   arguments and allows returning results.
     ///
     /// # Examples
     ///
@@ -290,8 +290,8 @@ impl UI {
     ///
     /// * `name` - Name of the function
     /// * `f` - The function. It should take a [`Vec`] of [`JSObject`] arguments by value, and
-    ///         return a [`Future`] for the [`JSResult`] (generally, by using an `async move`
-    ///         block body)
+    ///   return a [`Future`] for the [`JSResult`] (generally, by using an `async move`
+    ///   block body)
     ///
     /// # Examples
     ///
@@ -359,7 +359,6 @@ impl UI {
     /// assert_eq!(ui.eval("'Hello'+' World'").unwrap(), "Hello World");
     /// assert!(ui.eval("xfgch").is_err());
     /// ```
-
     pub fn eval(&self, js: &str) -> JSResult {
         eval(self.chrome.clone(), js)
     }
@@ -379,7 +378,6 @@ impl UI {
     /// ui.load_js("function loadedFunction() { return 'This function was loaded from rust'; }").expect("Unable to load js");
     /// assert_eq!(ui.eval("loadedFunction()").unwrap(), "This function was loaded from rust");
     /// ```
-
     pub fn load_js(&self, script: &str) -> Result<(), JSError> {
         load_js(self.chrome.clone(), script)
     }
@@ -398,7 +396,6 @@ impl UI {
     /// let ui = UIBuilder::new().custom_args(&["--headless"]).run().expect("Unable to launch");
     /// ui.load_css("body {display: none;}").expect("Unable to load css");
     /// ```
-
     pub fn load_css(&self, css: &str) -> Result<(), JSError> {
         load_css(self.chrome.clone(), css)
     }

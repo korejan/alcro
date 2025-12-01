@@ -31,7 +31,7 @@ fn main() -> anyhow::Result<()> {
         Ok(JSObject::Null)
     })?;
 
-    ui.eval("printDetails()").map_err(|e| JSError::from(e))?;
+    ui.eval("printDetails()").map_err(JSError::from)?;
     ui.wait_finish();
     Ok(())
 }

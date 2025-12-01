@@ -1,7 +1,8 @@
 use super::{PipeReader, PipeWriter};
 use std::ptr::null_mut as NULL;
 
-#[repr(packed)]
+#[repr(C, packed)]
+#[allow(dead_code)]
 struct StdioBuffer5 {
     no_fds: u32,
     flags: [u8; 5],
@@ -13,7 +14,6 @@ const FPIPE: u8 = 0x08;
 const FDEV: u8 = 0x40;
 pub type Process = HANDLE;
 
-use os_str_bytes::OsStrBytes;
 use std::ffi::{OsStr, OsString};
 use std::os::windows::ffi::OsStrExt;
 
@@ -142,8 +142,8 @@ pub fn new_process(path: &str, args: &[&str]) -> Result<(Process, PipeReader, Pi
 
         use std::fs::File;
         use std::os::windows::io::FromRawHandle;
-        let writep = PipeWriter::new(File::from_raw_handle(writepipe3));
-        let readp = PipeReader::new(File::from_raw_handle(readpipe4));
+        let writep = PipeWriter::new(File::from_raw_handle(writepipe3 as *mut std::ffi::c_void));
+        let readp = PipeReader::new(File::from_raw_handle(readpipe4 as *mut std::ffi::c_void));
         Ok((processinfo.hProcess, readp, writep))
     }
 }
@@ -201,9 +201,9 @@ fn append_arg(cmd: &mut Vec<u16>, arg: &OsStr, force_quotes: bool) -> io::Result
     // that it actually gets passed through on the command line or otherwise
     // it will be dropped entirely when parsed on the other end.
     ensure_no_nuls(arg)?;
-    let arg_bytes = &arg.to_raw_bytes();
+    let wide_arg: Vec<u16> = arg.encode_wide().collect();
     let quote =
-        force_quotes || arg_bytes.iter().any(|c| *c == b' ' || *c == b'\t') || arg_bytes.is_empty();
+        force_quotes || wide_arg.iter().any(|c| *c == ' ' as u16 || *c == '\t' as u16) || wide_arg.is_empty();
     if quote {
         cmd.push('"' as u16);
     }
