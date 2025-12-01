@@ -22,7 +22,7 @@ use std::{
 };
 pub type Process = Pid;
 
-extern "C" {
+unsafe extern "C" {
     static environ: *const *mut c_char;
 }
 
@@ -46,17 +46,17 @@ pub fn new_process(
         ))?;
         Errno::result(posix_spawn_file_actions_adddup2(
             &mut file_actions,
-            null_read,
+            null_read.as_raw_fd(),
             0,
         ))?;
         Errno::result(posix_spawn_file_actions_adddup2(
             &mut file_actions,
-            null_write,
+            null_write.as_raw_fd(),
             1,
         ))?;
         Errno::result(posix_spawn_file_actions_adddup2(
             &mut file_actions,
-            null_write,
+            null_write.as_raw_fd(),
             2,
         ))?;
         Errno::result(posix_spawn_file_actions_adddup2(

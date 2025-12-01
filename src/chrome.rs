@@ -12,10 +12,12 @@ mod devtools;
 use devtools::{readloop, recv_msg, send, send_msg};
 mod os;
 #[cfg(target_family = "windows")]
-use os::close_process_handle;
+use os::{close_process_handle, process_to_usize, usize_to_process};
 #[cfg(target_family = "unix")]
 use os::kill_proc;
-use os::{exited, new_process, wait_proc, PipeReader, PipeWriter, Process};
+use os::{exited, new_process, wait_proc, PipeReader, PipeWriter};
+#[cfg(target_family = "unix")]
+use os::Process;
 
 /// A JS object. It is an alias for `serde_json::Value`. See it's documentation for how to use it.
 pub type JSObject = serde_json::Value;
@@ -175,7 +177,8 @@ impl Chrome {
     pub fn new_with_args(chrome_binary: &str, args: &[&str]) -> Result<Arc<Chrome>, JSError> {
         let (pid, precv, psend) =
             new_process(chrome_binary, args).expect("Unable to launch chrome");
-        let (kill_send, _kill_recv) = bounded(1);
+        #[cfg_attr(not(target_family = "unix"), allow(unused_variables))]
+        let (kill_send, kill_recv) = bounded(1);
 
         let mut c = Chrome {
             id: AtomicI32::new(2),
@@ -188,9 +191,9 @@ impl Chrome {
             bindings: dashmap::DashMap::new(),
             kill_send,
             #[cfg(target_family = "windows")]
-            pid: pid as usize,
+            pid: process_to_usize(pid),
             #[cfg(target_family = "unix")]
-            pid: pid,
+            pid,
         };
 
         c.target = c.find_target();
@@ -290,12 +293,24 @@ impl Chrome {
         }
     }
 
+    #[cfg(target_family = "windows")]
     pub fn done(&self) -> bool {
-        exited(self.pid as Process).expect("Error in getting process state")
+        exited(usize_to_process(self.pid)).expect("Error in getting process state")
     }
 
+    #[cfg(target_family = "unix")]
+    pub fn done(&self) -> bool {
+        exited(self.pid).expect("Error in getting process state")
+    }
+
+    #[cfg(target_family = "windows")]
     pub fn wait_finish(&self) {
-        wait_proc(self.pid as Process).expect("Error in waiting for process")
+        wait_proc(usize_to_process(self.pid)).expect("Error in waiting for process")
+    }
+
+    #[cfg(target_family = "unix")]
+    pub fn wait_finish(&self) {
+        wait_proc(self.pid).expect("Error in waiting for process")
     }
 }
 
@@ -489,5 +504,5 @@ pub fn close(c: Arc<Chrome>) {
 
 #[cfg(target_family = "windows")]
 pub fn close_handle(c: Arc<Chrome>) {
-    close_process_handle(c.pid as Process).expect("Unable to close handle")
+    close_process_handle(usize_to_process(c.pid)).expect("Unable to close handle")
 }
