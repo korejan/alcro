@@ -14,6 +14,8 @@ fn test_content() {
         .custom_args(&["--headless"])
         .run()
         .expect("Unable to launch");
+    // Wait for the page to actually navigate (Page.navigate is async)
+    std::thread::sleep(std::time::Duration::from_millis(500));
     assert_eq!(
         ui2.eval("window.location.href").unwrap(),
         "https://www.google.com/"

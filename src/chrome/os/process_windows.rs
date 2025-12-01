@@ -1,6 +1,23 @@
 use super::{PipeReader, PipeWriter};
-use std::ptr::null_mut as NULL;
+use std::ffi::{OsStr, OsString};
+use std::mem::zeroed;
+use std::os::windows::ffi::OsStrExt;
+use std::ptr::null_mut;
 
+use windows::Win32::Foundation::{CloseHandle, GetLastError, HANDLE, WAIT_FAILED, WAIT_OBJECT_0};
+use windows::Win32::Security::SECURITY_ATTRIBUTES;
+use windows::Win32::Storage::FileSystem::{
+    CreateFileW, FILE_GENERIC_READ, FILE_GENERIC_WRITE, FILE_READ_ATTRIBUTES, FILE_SHARE_READ,
+    FILE_SHARE_WRITE, OPEN_EXISTING,
+};
+use windows::Win32::System::Pipes::CreatePipe;
+use windows::Win32::System::Threading::{
+    CreateProcessW, WaitForSingleObject, INFINITE, PROCESS_INFORMATION, STARTUPINFOW,
+};
+use windows::core::{PCWSTR, PWSTR};
+
+/// MSVC-specific stdio buffer structure for passing file handles to child processes.
+/// This enables Chrome DevTools communication via file descriptors 3 and 4.
 #[repr(C, packed)]
 #[allow(dead_code)]
 struct StdioBuffer5 {
@@ -12,158 +29,145 @@ struct StdioBuffer5 {
 const FOPEN: u8 = 0x01;
 const FPIPE: u8 = 0x08;
 const FDEV: u8 = 0x40;
+
 pub type Process = HANDLE;
 
-use std::ffi::{OsStr, OsString};
-use std::os::windows::ffi::OsStrExt;
-
-fn l(string: &str) -> Vec<u16> {
-    use std::iter::once;
-    OsStr::new(string).encode_wide().chain(once(0)).collect()
+/// Convert a `Process` (HANDLE) to a `usize` for storage
+#[inline]
+pub fn process_to_usize(p: Process) -> usize {
+    p.0 as usize
 }
 
-use std::mem::*;
-use winapi::shared::minwindef::{TRUE, *};
-use winapi::shared::ntdef::HANDLE;
-use winapi::um::errhandlingapi::*;
-use winapi::um::fileapi::*;
-use winapi::um::handleapi::*;
-use winapi::um::minwinbase::*;
-use winapi::um::namedpipeapi::*;
-use winapi::um::processthreadsapi::*;
-use winapi::um::winbase::*;
-use winapi::um::winnt::*;
+/// Convert a `usize` back to a `Process` (HANDLE)
+#[inline]
+pub fn usize_to_process(u: usize) -> Process {
+    HANDLE(u as *mut std::ffi::c_void)
+}
+
+fn to_wide_null(string: &str) -> Vec<u16> {
+    OsStr::new(string)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect()
+}
 
 pub fn new_process(path: &str, args: &[&str]) -> Result<(Process, PipeReader, PipeWriter), String> {
     unsafe {
-        let size_sa = size_of::<SECURITY_ATTRIBUTES>() as u32;
-        let mut sa = SECURITY_ATTRIBUTES {
-            nLength: size_sa,
-            lpSecurityDescriptor: NULL(),
-            bInheritHandle: TRUE,
+        let sa = SECURITY_ATTRIBUTES {
+            nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
+            lpSecurityDescriptor: null_mut(),
+            bInheritHandle: true.into(),
         };
 
+        // Open NUL device for stdin/stdout/stderr redirection
+        let nul_name = to_wide_null("NUL");
         let null_read = CreateFileW(
-            l("NUL").as_mut_ptr(),
-            FILE_GENERIC_READ,
+            PCWSTR::from_raw(nul_name.as_ptr()),
+            FILE_GENERIC_READ.0,
             FILE_SHARE_READ | FILE_SHARE_WRITE,
-            &mut sa as LPSECURITY_ATTRIBUTES,
+            Some(&sa),
             OPEN_EXISTING,
-            0,
-            NULL(),
-        );
-        if null_read == INVALID_HANDLE_VALUE {
-            return Err(format!("CreateFileW failed with error {}", GetLastError()));
-        }
+            Default::default(),
+            None,
+        )
+        .map_err(|e| format!("CreateFileW (read) failed: {e}"))?;
+
         let null_write = CreateFileW(
-            l("NUL").as_mut_ptr(),
-            FILE_GENERIC_WRITE | FILE_READ_ATTRIBUTES,
+            PCWSTR::from_raw(nul_name.as_ptr()),
+            (FILE_GENERIC_WRITE | FILE_READ_ATTRIBUTES).0,
             FILE_SHARE_READ | FILE_SHARE_WRITE,
-            &mut sa as LPSECURITY_ATTRIBUTES,
+            Some(&sa),
             OPEN_EXISTING,
-            0,
-            NULL(),
-        );
-        if null_write == INVALID_HANDLE_VALUE {
-            return Err(format!("CreateFileW failed with error {}", GetLastError()));
-        }
-        let mut readpipe3: HANDLE = NULL();
-        let mut writepipe3: HANDLE = NULL();
-        if CreatePipe(
-            &mut readpipe3 as LPHANDLE,
-            &mut writepipe3 as LPHANDLE,
-            &mut sa as LPSECURITY_ATTRIBUTES,
-            0,
-        ) == 0
-        {
-            return Err(format!("CreatePipe failed with error {}", GetLastError()));
-        }
+            Default::default(),
+            None,
+        )
+        .map_err(|e| format!("CreateFileW (write) failed: {e}"))?;
 
-        let mut readpipe4: HANDLE = NULL();
-        let mut writepipe4: HANDLE = NULL();
-        if CreatePipe(
-            &mut readpipe4 as LPHANDLE,
-            &mut writepipe4 as LPHANDLE,
-            &mut sa as LPSECURITY_ATTRIBUTES,
-            0,
-        ) == 0
-        {
-            return Err(format!("CreatePipe failed with error {}", GetLastError()));
-        }
+        // Create pipes for fd 3 (Chrome reads from) and fd 4 (Chrome writes to)
+        let mut readpipe3 = HANDLE::default();
+        let mut writepipe3 = HANDLE::default();
+        CreatePipe(&mut readpipe3, &mut writepipe3, Some(&sa), 0)
+            .map_err(|e| format!("CreatePipe (pipe3) failed: {e}"))?;
 
-        let mut startupinfo: STARTUPINFOW = zeroed();
-        let mut processinfo: PROCESS_INFORMATION = zeroed();
+        let mut readpipe4 = HANDLE::default();
+        let mut writepipe4 = HANDLE::default();
+        CreatePipe(&mut readpipe4, &mut writepipe4, Some(&sa), 0)
+            .map_err(|e| format!("CreatePipe (pipe4) failed: {e}"))?;
+
+        // Set up MSVC stdio buffer for fd 0-4
         let mut stdio_buffer = StdioBuffer5 {
             no_fds: 5,
             flags: [
-                FOPEN | FDEV,
-                FOPEN | FDEV,
-                FOPEN | FDEV,
-                FOPEN | FPIPE,
-                FOPEN | FPIPE,
+                FOPEN | FDEV,  // fd 0: stdin -> NUL
+                FOPEN | FDEV,  // fd 1: stdout -> NUL
+                FOPEN | FDEV,  // fd 2: stderr -> NUL
+                FOPEN | FPIPE, // fd 3: read pipe (Chrome reads from)
+                FOPEN | FPIPE, // fd 4: write pipe (Chrome writes to)
             ],
             handles: [null_read, null_write, null_write, readpipe3, writepipe4],
         };
 
-        startupinfo.cb = size_of::<STARTUPINFOW>() as u32;
-        startupinfo.cbReserved2 = size_of::<StdioBuffer5>() as u16;
-        startupinfo.lpReserved2 = &mut stdio_buffer as *mut StdioBuffer5 as LPBYTE;
+        let mut startupinfo: STARTUPINFOW = zeroed();
+        startupinfo.cb = std::mem::size_of::<STARTUPINFOW>() as u32;
+        startupinfo.cbReserved2 = std::mem::size_of::<StdioBuffer5>() as u16;
+        startupinfo.lpReserved2 = &mut stdio_buffer as *mut StdioBuffer5 as *mut u8;
+
+        let mut processinfo: PROCESS_INFORMATION = zeroed();
 
         let args: Vec<OsString> = args.iter().map(OsString::from).collect();
-        let mut cmd_str = make_command_line(&OsString::from(path), &args).unwrap();
-        if CreateProcessW(
-            NULL(),
-            cmd_str.as_mut_ptr(),
-            NULL(),
-            NULL(),
-            TRUE,
-            0,
-            NULL(),
-            NULL(),
-            &mut startupinfo as LPSTARTUPINFOW,
-            &mut processinfo as LPPROCESS_INFORMATION,
-        ) == 0
-        {
-            return Err(format!(
-                "CreateProcessW failed with error {}",
-                GetLastError()
-            ));
-        }
+        let mut cmd_str = make_command_line(&OsString::from(path), &args)
+            .map_err(|e| format!("Failed to build command line: {e}"))?;
 
-        if CloseHandle(processinfo.hThread) == 0 {
-            return Err(format!("CloseHandle failed with error {}", GetLastError()));
-        }
-        if CloseHandle(readpipe3) == 0 {
-            return Err(format!("CloseHandle failed with error {}", GetLastError()));
-        }
-        if CloseHandle(writepipe4) == 0 {
-            return Err(format!("CloseHandle failed with error {}", GetLastError()));
-        }
+        CreateProcessW(
+            None,
+            Some(PWSTR::from_raw(cmd_str.as_mut_ptr())),
+            None,
+            None,
+            true, // bInheritHandles
+            Default::default(),
+            None,
+            None,
+            &startupinfo,
+            &mut processinfo,
+        )
+        .map_err(|e| format!("CreateProcessW failed: {e}"))?;
 
+        // Close handles we don't need
+        CloseHandle(processinfo.hThread)
+            .map_err(|e| format!("CloseHandle (hThread) failed: {e}"))?;
+        CloseHandle(readpipe3)
+            .map_err(|e| format!("CloseHandle (readpipe3) failed: {e}"))?;
+        CloseHandle(writepipe4)
+            .map_err(|e| format!("CloseHandle (writepipe4) failed: {e}"))?;
+
+        // Convert remaining handles to File for PipeReader/PipeWriter
         use std::fs::File;
         use std::os::windows::io::FromRawHandle;
-        let writep = PipeWriter::new(File::from_raw_handle(writepipe3 as *mut std::ffi::c_void));
-        let readp = PipeReader::new(File::from_raw_handle(readpipe4 as *mut std::ffi::c_void));
+        let writep = PipeWriter::new(File::from_raw_handle(writepipe3.0));
+        let readp = PipeReader::new(File::from_raw_handle(readpipe4.0));
+
         Ok((processinfo.hProcess, readp, writep))
     }
 }
 
 pub fn exited(pid: Process) -> std::io::Result<bool> {
-    use winapi::um::synchapi::WaitForSingleObject;
     unsafe {
-        match WaitForSingleObject(pid, 0) {
-            WAIT_OBJECT_0 => Ok(true),
-            WAIT_FAILED => Err(std::io::Error::last_os_error()),
-            _ => Ok(false),
+        let result = WaitForSingleObject(pid, 0);
+        if result == WAIT_OBJECT_0 {
+            Ok(true)
+        } else if result == WAIT_FAILED {
+            Err(std::io::Error::from_raw_os_error(GetLastError().0 as i32))
+        } else {
+            Ok(false)
         }
     }
 }
 
 pub fn wait_proc(pid: Process) -> std::io::Result<()> {
-    use winapi::um::synchapi::WaitForSingleObject;
     unsafe {
-        if WaitForSingleObject(pid, INFINITE) == WAIT_FAILED {
-            Err(std::io::Error::last_os_error())
+        let result = WaitForSingleObject(pid, INFINITE);
+        if result == WAIT_FAILED {
+            Err(std::io::Error::from_raw_os_error(GetLastError().0 as i32))
         } else {
             Ok(())
         }
@@ -171,13 +175,7 @@ pub fn wait_proc(pid: Process) -> std::io::Result<()> {
 }
 
 pub fn close_process_handle(p: Process) -> std::io::Result<()> {
-    unsafe {
-        if CloseHandle(p) == 0 {
-            Err(std::io::Error::last_os_error())
-        } else {
-            Ok(())
-        }
-    }
+    unsafe { CloseHandle(p).map_err(|e| std::io::Error::from_raw_os_error(e.code().0)) }
 }
 
 use std::io::{self, ErrorKind};
